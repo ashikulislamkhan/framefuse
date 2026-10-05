@@ -3,18 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Frame My Photo</title>
+<title>FrameFuse · Free Profile Picture Frame &amp; DP Overlay Tool</title>
+<meta name="theme-color" content="#0b8794">
+<meta name="description" content="Free profile picture frame and DP overlay tool. Runs entirely in your browser.">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
   :root {
-    --bg: #e9edf3; --panel: #ffffff; --ink: #18212f; --muted: #5d6879;
-    --line: #d3dae5; --accent: #2342d9; --accent-ink: #ffffff; --radius: 12px;
-    --check-a: #f4f6fa; --check-b: #dfe4ec;
+    --bg: #e3f5f6; --panel: #ffffff; --ink: #0c2a2e; --muted: #4f6f77;
+    --line: #bfe0e3; --accent: #0b8794; --accent-ink: #ffffff; --radius: 12px;
+    --check-a: #f1fafb; --check-b: #d6ebed;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #141a24; --panel: #1d2531; --ink: #e8edf5; --muted: #98a3b5;
-      --line: #324052; --accent: #7a93ff; --accent-ink: #0d1324;
-      --check-a: #2a3342; --check-b: #232b38;
+      --bg: #0b1b1f; --panel: #12272c; --ink: #e4f6f8; --muted: #8fb0b6;
+      --line: #25444b; --accent: #2dd4cf; --accent-ink: #04201f;
+      --check-a: #1b3338; --check-b: #152a2e;
     }
   }
   * { box-sizing: border-box; }
@@ -72,12 +77,22 @@
   .status a { color: var(--accent); }
   .status.error { color: #c62828; }
   .note { font-size: 0.8125rem; color: var(--muted); margin: 0; }
+  [hidden] { display: none !important; }
+  .file.over, .stage.over { outline: 2px dashed var(--accent); outline-offset: -2px; }
+  .thumbs { display: flex; gap: 8px; flex-wrap: wrap; }
+  .th { position: relative; }
+  .th > button:first-child { width: 52px; height: 52px; padding: 0; overflow: hidden; }
+  .th.on > button:first-child { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .th .rm { position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; padding: 0; border-radius: 50%; line-height: 1; background: var(--panel); }
+  .tick { display: flex; gap: 8px; align-items: center; font-size: 0.875rem; }
+  .foot { text-align: center; color: var(--muted); font-size: 0.8125rem; padding: 8px 16px 28px; }
 </style>
 </head>
 <body>
 <main class="app">
-  <h1>Frame My Photo</h1>
-  <p class="sub">Add a transparent PNG frame to a photo. Everything runs in your browser, and your images never leave this device.</p>
+  <h1>FrameFuse</h1>
+  <p class="sub">Free Profile Picture Frame &amp; DP Overlay Tool</p>
 
   <div class="layout">
     <section class="stage-wrap" aria-label="Preview">
@@ -92,8 +107,10 @@
         <h2>Images</h2>
         <label class="file"><strong>Frame (PNG)</strong><span class="name" id="frameName">None</span>
           <input type="file" id="frameInput" accept="image/png"></label>
-        <label class="file"><strong>Photo</strong><span class="name" id="photoName">None</span>
-          <input type="file" id="photoInput" accept="image/*"></label>
+        <label class="file"><strong>Photos</strong><span class="name" id="photoName">None</span>
+          <input type="file" id="photoInput" accept="image/*" multiple></label>
+        <div class="thumbs" id="thumbs"></div>
+        <p class="note">Everything runs in your browser. Images never leave your device.</p>
       </div>
 
       <div class="group">
@@ -107,12 +124,21 @@
           <button id="rotR" disabled>Rotate +90°</button>
           <button id="reset" disabled>Reset</button>
         </div>
-        <p class="note">Drag to move. Scroll or pinch to zoom. The frame stays fixed.</p>
+        <p class="note">Drag to move. Scroll or pinch to zoom, twist two fingers to rotate. The frame stays fixed.</p>
+        <label class="tick"><input type="checkbox" id="face" checked> Auto-position on faces (where supported)</label>
       </div>
 
       <div class="group">
         <h2>Export</h2>
-        <label class="ctl"><span class="head"><span>Output size</span></span>
+        <label class="ctl"><span class="head"><span>Export preset</span></span>
+          <select id="preset">
+            <option value="0">Original (frame shape)</option>
+            <option value="720">Facebook (720 × 720)</option>
+            <option value="400">LinkedIn (400 × 400)</option>
+            <option value="640">WhatsApp (640 × 640)</option>
+            <option value="512">Discord (512 × 512)</option>
+          </select></label>
+        <label class="ctl" id="sizeWrap"><span class="head"><span>Output size</span></span>
           <select id="size">
             <option value="auto">Auto (keep photo detail, up to 4×)</option>
             <option value="1">Same as frame (1×)</option>
@@ -121,10 +147,12 @@
           </select></label>
         <button class="primary" id="generate" disabled>Generate PNG</button>
         <div class="status" id="status" role="status" aria-live="polite"></div>
+        <button id="install" hidden>Install app</button>
       </div>
     </section>
   </div>
 </main>
+<footer class="foot">© All rights reserved Khan Inc. | Ashikul Islam Khan</footer>
 
 <script>
 "use strict";
@@ -140,6 +168,8 @@
 /* ---------- State ---------- */
 const state = {
   frame: null,           // ImageBitmap of the frame
+  items: [], cur: -1,    // batch: loaded photos and the selected index
+  face: null,            // face of the current photo {x, y, w} in photo pixels
   photo: null,           // ImageBitmap of the photo
   W: 1080, H: 1080,      // output canvas size at 1× (frame size)
   cx: 540, cy: 540,      // photo centre, in frame pixels
@@ -160,7 +190,8 @@ const el = {
   frameName: $("frameName"), photoName: $("photoName"),
   zoom: $("zoom"), rot: $("rot"), zoomVal: $("zoomVal"), rotVal: $("rotVal"),
   rotL: $("rotL"), rotR: $("rotR"), reset: $("reset"),
-  size: $("size"), generate: $("generate"), status: $("status")
+  size: $("size"), generate: $("generate"), status: $("status"),
+  preset: $("preset"), face: $("face"), thumbs: $("thumbs"), install: $("install")
 };
 const pctx = el.canvas.getContext("2d");
 
@@ -195,6 +226,14 @@ const Transform = {
     state.base = Math.max(W / photo.width, H / photo.height);
     state.scale = state.base;
     state.cx = W / 2; state.cy = H / 2; state.rot = 0;
+    const f = el.face.checked && state.face;
+    if (!f) return;
+    // Suggested crop: face is ~45% of the short side, slightly above centre.
+    const s = this.clampScale(Math.max(state.base, (0.45 * Math.min(W, H)) / f.w));
+    const hw = (photo.width * s) / 2, hh = (photo.height * s) / 2;
+    state.scale = s;
+    state.cx = Math.min(hw, Math.max(W - hw, W / 2 - (f.x - photo.width / 2) * s));
+    state.cy = Math.min(hh, Math.max(H - hh, H * 0.42 - (f.y - photo.height / 2) * s));
   },
   /** Zoom by `factor` while keeping the point (px, py) in frame pixels fixed. */
   zoomAt(px, py, factor) {
@@ -213,13 +252,14 @@ const Renderer = {
    * Draw photo (bottom) then frame (top) onto ctx at scale factor k.
    * k = 1 means frame pixels map 1:1 to canvas pixels.
    */
-  draw(ctx, k) {
+  draw(ctx, k, ox = 0, oy = 0) {
     const { photo, frame, W, H, cx, cy, scale, rot } = state;
-    ctx.clearRect(0, 0, W * k, H * k);
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     if (photo) {
       ctx.save();
+      ctx.translate(ox, oy);
       ctx.scale(k, k);
       ctx.translate(cx, cy);
       ctx.rotate((rot * Math.PI) / 180);
@@ -227,10 +267,13 @@ const Renderer = {
       ctx.drawImage(photo, -photo.width / 2, -photo.height / 2);
       ctx.restore();
     }
-    if (frame) ctx.drawImage(frame, 0, 0, W * k, H * k);
+    if (frame) ctx.drawImage(frame, ox, oy, W * k, H * k);
   },
   /** Resize the preview backing store and stage aspect ratio, then redraw. */
   preview() {
+    this.raf ||= requestAnimationFrame(() => { this.raf = 0; this.paint(); });   // one paint per frame
+  },
+  paint() {
     const kp = Math.min(1, PREVIEW_MAX / Math.max(state.W, state.H));
     const w = Math.round(state.W * kp), h = Math.round(state.H * kp);
     if (el.canvas.width !== w || el.canvas.height !== h) {
@@ -253,7 +296,8 @@ const Interaction = {
   geometry(points) {
     if (points.length < 2) return null;
     const [a, b] = points;
-    return { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+    return { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2,
+             ang: Math.atan2(b.y - a.y, b.x - a.x) };
   },
 
   init() {
@@ -272,10 +316,14 @@ const Interaction = {
       const after = this.geometry([...this.pointers.values()]);
       const f = state.W / c.getBoundingClientRect().width;
 
-      if (before && after) {            // two fingers: pinch-zoom + pan
+      if (before && after) {            // two fingers: pinch-zoom, twist-rotate, pan
         const [px, py] = this.toFrame(after.mx, after.my);
         Transform.pan((after.mx - before.mx) * f, (after.my - before.my) * f);
         if (before.d > 0) Transform.zoomAt(px, py, after.d / before.d);
+        const dr = after.ang - before.ang, cos = Math.cos(dr), sin = Math.sin(dr);
+        const vx = state.cx - px, vy = state.cy - py;   // rotate about the pinch midpoint
+        state.cx = px + vx * cos - vy * sin; state.cy = py + vx * sin + vy * cos;
+        state.rot += (dr * 180) / Math.PI;
       } else {                          // one pointer: pan
         Transform.pan((e.clientX - prev.x) * f, (e.clientY - prev.y) * f);
       }
@@ -322,6 +370,14 @@ const Exporter = {
 
   /** Render at full resolution on an offscreen canvas, shrinking if the device refuses. */
   render() {
+    const p = Number(el.preset.value);
+    if (p) {                                   // square social preset: centre-crop
+      const c = this.makeCanvas(p, p);
+      if (!c) throw new Error("This device can't allocate that canvas.");
+      const k = p / Math.min(state.W, state.H);
+      Renderer.draw(c.getContext("2d"), k, (p - state.W * k) / 2, (p - state.H * k) / 2);
+      return c;
+    }
     let k = this.chooseScale();
     while (k > 0.25) {
       const w = Math.round(state.W * k), h = Math.round(state.H * k);
@@ -342,20 +398,144 @@ const Exporter = {
       canvas.toBlob((b) => (b ? res(b) : rej(new Error("PNG encoding failed."))), "image/png"));
   },
 
-  lastUrl: null,
-  async run() {
-    UI.setStatus("Rendering…");
-    await new Promise((r) => setTimeout(r, 30));   // let the status paint first
-    const canvas = this.render();
-    const blob = await this.toBlob(canvas);
-    if (this.lastUrl) URL.revokeObjectURL(this.lastUrl);
-    this.lastUrl = URL.createObjectURL(blob);
+  url: null,
+  save(blob, name) {
+    if (this.url) URL.revokeObjectURL(this.url);
+    this.url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = this.lastUrl; a.download = "framed-photo.png";
+    a.href = this.url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
-    const mb = (blob.size / 1048576).toFixed(1);
-    UI.setStatus(`Done: ${canvas.width} × ${canvas.height} px, ${mb} MB. `, false,
-                 { href: this.lastUrl, text: "Download again" });
+  },
+  /** Render every loaded photo (each keeps its own position); one PNG, or a ZIP for a batch. */
+  async run() {
+    const tick = () => new Promise((r) => setTimeout(r, 30));   // let the UI paint
+    const keep = state.cur, n = state.items.length, files = [], used = new Set();
+    for (let i = 0; i < n; i++) {
+      UI.setStatus(`Rendering ${i + 1} of ${n}…`); await tick();
+      Items.select(i);
+      const canvas = this.render();
+      const stem = state.items[i].name.replace(/\.[^.]+$/, "") + "-framed";
+      let name = stem, c = 1;
+      while (used.has(name)) name = `${stem}-${++c}`;
+      used.add(name);
+      files.push({ name: name + ".png", blob: await this.toBlob(canvas), w: canvas.width, h: canvas.height });
+    }
+    Items.select(keep); UI.refresh();
+    const one = files.length === 1;
+    const fname = one ? files[0].name : "framefuse-batch.zip";
+    const blob = one ? files[0].blob : await Zip.build(files);
+    this.save(blob, fname);
+    UI.setStatus(`Done: ${one ? `${files[0].w} × ${files[0].h} px` : `${n} images`}, ${(blob.size / 1048576).toFixed(1)} MB. `,
+                 false, { href: this.url, text: "Download again", name: fname });
+  }
+};
+
+/* ---------- Batch: photo list ---------- */
+const Items = {
+  /** Store the live transform back onto the selected item. */
+  save() {
+    const it = state.items[state.cur];
+    if (it) Object.assign(it.t, { cx: state.cx, cy: state.cy, scale: state.scale, rot: state.rot, base: state.base });
+  },
+  select(i) {
+    this.save();
+    state.cur = i;
+    const it = state.items[i];
+    state.photo = it.bmp; state.face = it.face;
+    Object.assign(state, it.t);
+  },
+  async add(file) {
+    const bmp = await Loader.decode(file);
+    const face = await Face.find(bmp);
+    state.items.push({ bmp, face, name: file.name, url: URL.createObjectURL(file), t: {} });
+    this.select(state.items.length - 1);
+    Transform.fit();
+    this.sync();
+  },
+  remove(i) {
+    this.save();
+    const was = state.cur, it = state.items[i];
+    URL.revokeObjectURL(it.url); it.bmp.close?.();
+    state.items.splice(i, 1);
+    if (state.items.length) {
+      state.cur = -1;
+      this.select(i === was ? Math.min(i, state.items.length - 1) : i < was ? was - 1 : was);
+    } else { state.cur = -1; state.photo = null; state.face = null; }
+    this.sync(); UI.refresh();
+  },
+  /** Re-fit every photo (used when the frame size changes). */
+  refitAll() {
+    const keep = state.cur;
+    state.items.forEach((_, i) => { this.select(i); Transform.fit(); });
+    if (keep >= 0) this.select(keep);
+  },
+  sync() {
+    const n = state.items.length;
+    el.photoName.textContent = n === 1 ? state.items[0].name : n ? `${n} photos` : "None";
+    el.thumbs.replaceChildren(...state.items.map((it, i) => {
+      const d = document.createElement("div");
+      d.className = "th" + (i === state.cur ? " on" : "");
+      const b = document.createElement("button");
+      b.title = it.name;
+      const img = new Image(); img.src = it.url; img.alt = it.name; b.append(img);
+      b.onclick = () => { this.select(i); this.sync(); UI.refresh(); };
+      const x = document.createElement("button");
+      x.className = "rm"; x.textContent = "×"; x.setAttribute("aria-label", "Remove " + it.name);
+      x.onclick = () => this.remove(i);
+      d.append(b, x);
+      return d;
+    }));
+  }
+};
+
+/** Face detection: uses the browser's built-in FaceDetector when present (no model download). */
+const Face = {
+  det: null,
+  async find(bmp) {
+    if (!("FaceDetector" in window)) return null;
+    try {
+      this.det ||= new FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
+      const r = await this.det.detect(bmp);
+      if (!r.length) return null;
+      const b = r[0].boundingBox;
+      return { x: b.x + b.width / 2, y: b.y + b.height / 2, w: b.width };
+    } catch (_) { return null; }
+  }
+};
+
+/** Minimal "store" ZIP writer (PNG is already compressed), so batches download as one file. */
+const Zip = {
+  table: (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+    return t;
+  })(),
+  crc(u8) {
+    let c = -1;
+    for (let i = 0; i < u8.length; i++) c = this.table[(c ^ u8[i]) & 255] ^ (c >>> 8);
+    return ~c >>> 0;
+  },
+  async build(files) {
+    const enc = new TextEncoder(), parts = [], central = [];
+    let off = 0, cdSize = 0;
+    for (const f of files) {
+      const data = new Uint8Array(await f.blob.arrayBuffer()), name = enc.encode(f.name), crc = this.crc(data);
+      const h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);
+      h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true);
+      h.setUint16(26, name.length, true);
+      parts.push(h, name, data);
+      const c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true);
+      c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true);
+      c.setUint16(28, name.length, true); c.setUint32(42, off, true);
+      central.push(c, name);
+      off += 30 + name.length + data.length; cdSize += 46 + name.length;
+    }
+    const e = new DataView(new ArrayBuffer(22));
+    e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true);
+    e.setUint32(12, cdSize, true); e.setUint32(16, off, true);
+    return new Blob([...parts, ...central, e], { type: "application/zip" });
   }
 };
 
@@ -366,7 +546,7 @@ const UI = {
     el.status.textContent = text;
     if (link) {
       const a = document.createElement("a");
-      a.href = link.href; a.download = "framed-photo.png"; a.textContent = link.text;
+      a.href = link.href; a.download = link.name; a.textContent = link.text;
       el.status.appendChild(a);
     }
   },
@@ -376,6 +556,7 @@ const UI = {
     const has = !!state.photo;
     [el.zoom, el.rot, el.rotL, el.rotR, el.reset].forEach((n) => (n.disabled = !has));
     el.generate.disabled = !(has && state.frame);
+    el.generate.textContent = state.items.length > 1 ? `Generate ${state.items.length} images (ZIP)` : "Generate PNG";
     el.empty.hidden = has && state.frame;
     el.empty.textContent = !state.frame && !has ? "Choose a frame and a photo to start."
       : !state.frame ? "Now choose a transparent PNG frame." : "Now choose a photo.";
@@ -395,27 +576,40 @@ const UI = {
     state.frame = bmp;
     state.W = bmp.width; state.H = bmp.height;
     el.frameName.textContent = file.name;
-    if (sizeChanged) Transform.fit();     // new canvas size: re-centre the photo
+    if (sizeChanged) Items.refitAll();     // new canvas size: re-centre the photo
   },
 
-  async loadPhoto(file) {
-    const bmp = await Loader.decode(file);
-    state.photo?.close?.();
-    state.photo = bmp;
-    el.photoName.textContent = file.name;
-    Transform.fit();
+  /** Load files as the frame or as photos (batch), reporting errors in the status line. */
+  async ingest(files, kind) {
+    if (!files.length) return;
+    try {
+      this.setStatus("");
+      if (kind === "frame") await this.loadFrame(files[0]);
+      else for (const f of files) await Items.add(f);
+    } catch (_) { this.setStatus("Couldn't open that file. Try a PNG, JPG or WebP image.", true); }
+    this.refresh();
   },
 
   init() {
-    const guard = (fn) => async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      try { this.setStatus(""); await fn(file); }
-      catch (err) { this.setStatus("Couldn't open that file. Try a PNG, JPG or WebP image.", true); }
-      this.refresh();
+    const pick = (kind) => (e) => { this.ingest([...e.target.files], kind); e.target.value = ""; };
+    el.frameInput.addEventListener("change", pick("frame"));
+    el.photoInput.addEventListener("change", pick("photo"));
+
+    // Drag-and-drop on both pickers and on the preview stage.
+    const drop = (target, kindFor) => {
+      ["dragenter", "dragover"].forEach((t) => target.addEventListener(t, (e) => { e.preventDefault(); target.classList.add("over"); }));
+      ["dragleave", "drop"].forEach((t) => target.addEventListener(t, (e) => { e.preventDefault(); target.classList.remove("over"); }));
+      target.addEventListener("drop", (e) => {
+        const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/"));
+        if (files.length) this.ingest(files, kindFor(files));
+      });
     };
-    el.frameInput.addEventListener("change", guard((f) => this.loadFrame(f)));
-    el.photoInput.addEventListener("change", guard((f) => this.loadPhoto(f)));
+    drop(el.frameInput.parentElement, () => "frame");
+    drop(el.photoInput.parentElement, () => "photo");
+    drop(el.stage, (fs) => (!state.frame && fs[0].type === "image/png" ? "frame" : "photo"));
+    window.addEventListener("dragover", (e) => e.preventDefault());   // a missed drop shouldn't open the file
+    window.addEventListener("drop", (e) => e.preventDefault());
+
 
     el.zoom.addEventListener("input", () => {
       const next = Transform.clampScale(state.base * 2 ** Number(el.zoom.value));
@@ -433,12 +627,23 @@ const UI = {
       el.generate.disabled = false;
     });
 
+    el.preset.addEventListener("change", () => { $("sizeWrap").hidden = el.preset.value !== "0"; });
+    el.face.addEventListener("change", () => { Transform.fit(); this.refresh(); });
+
     Interaction.init();
     this.refresh();
   }
 };
 
 UI.init();
+
+/* ---------- PWA: offline support + install button ---------- */
+(function registerPWA() {
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  let deferred = null;
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferred = e; el.install.hidden = false; });
+  el.install.addEventListener("click", () => { el.install.hidden = true; deferred?.prompt(); });
+})();
 </script>
 </body>
 </html>
