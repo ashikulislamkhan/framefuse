@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frame My Photo</title>
+<style>
+  :root {
+    --bg: #e9edf3; --panel: #ffffff; --ink: #18212f; --muted: #5d6879;
+    --line: #d3dae5; --accent: #2342d9; --accent-ink: #ffffff; --radius: 12px;
+    --check-a: #f4f6fa; --check-b: #dfe4ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141a24; --panel: #1d2531; --ink: #e8edf5; --muted: #98a3b5;
+      --line: #324052; --accent: #7a93ff; --accent-ink: #0d1324;
+      --check-a: #2a3342; --check-b: #232b38;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .app { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { margin: 0 0 20px; color: var(--muted); max-width: 60ch; }
+  .layout { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+  @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } }
+
+  /* Preview stage: checkerboard shows transparency */
+  .stage-wrap { display: flex; justify-content: center; background: var(--panel);
+    border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+  .stage {
+    --ar: 1; aspect-ratio: var(--ar); width: min(100%, calc(70vh * var(--ar)));
+    position: relative; border-radius: 6px; overflow: hidden;
+    background: conic-gradient(var(--check-b) 25%, var(--check-a) 0 50%, var(--check-b) 0 75%, var(--check-a) 0) 0 0 / 20px 20px;
+  }
+  canvas#preview { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  canvas#preview.dragging { cursor: grabbing; }
+  .empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+    padding: 24px; color: var(--muted); pointer-events: none; }
+  .empty[hidden] { display: none; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 16px; display: grid; gap: 16px; }
+  .group { display: grid; gap: 8px; }
+  .group h2 { font-size: 0.95rem; margin: 0; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .file { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; }
+  .file:hover, .file:focus-within { border-color: var(--accent); }
+  .file input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .file .name { color: var(--muted); font-size: 0.875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file strong { font-weight: 600; white-space: nowrap; }
+
+  label.ctl { display: grid; gap: 4px; font-size: 0.875rem; }
+  label.ctl .head { display: flex; justify-content: space-between; color: var(--muted); }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  select, button { font: inherit; }
+  select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink); }
+  button { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: transparent; color: var(--ink); cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
+    font-weight: 600; padding: 12px; width: 100%; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .status { font-size: 0.875rem; color: var(--muted); min-height: 1.4em; }
+  .status a { color: var(--accent); }
+  .status.error { color: #c62828; }
+  .note { font-size: 0.8125rem; color: var(--muted); margin: 0; }
+</style>
+</head>
+<body>
+<main class="app">
+  <h1>Frame My Photo</h1>
+  <p class="sub">Add a transparent PNG frame to a photo. Everything runs in your browser, and your images never leave this device.</p>
+
+  <div class="layout">
+    <section class="stage-wrap" aria-label="Preview">
+      <div class="stage" id="stage">
+        <canvas id="preview" aria-label="Preview. Drag to move the photo, scroll or pinch to zoom."></canvas>
+        <div class="empty" id="empty">Choose a frame and a photo to start.</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="group">
+        <h2>Images</h2>
+        <label class="file"><strong>Frame (PNG)</strong><span class="name" id="frameName">None</span>
+          <input type="file" id="frameInput" accept="image/png"></label>
+        <label class="file"><strong>Photo</strong><span class="name" id="photoName">None</span>
+          <input type="file" id="photoInput" accept="image/*"></label>
+      </div>
+
+      <div class="group">
+        <h2>Adjust photo</h2>
+        <label class="ctl"><span class="head"><span>Zoom</span><span id="zoomVal">1.00×</span></span>
+          <input type="range" id="zoom" min="-3" max="4" step="0.01" value="0" disabled></label>
+        <label class="ctl"><span class="head"><span>Rotation</span><span id="rotVal">0°</span></span>
+          <input type="range" id="rot" min="-180" max="180" step="0.5" value="0" disabled></label>
+        <div class="row">
+          <button id="rotL" disabled>Rotate −90°</button>
+          <button id="rotR" disabled>Rotate +90°</button>
+          <button id="reset" disabled>Reset</button>
+        </div>
+        <p class="note">Drag to move. Scroll or pinch to zoom. The frame stays fixed.</p>
+      </div>
+
+      <div class="group">
+        <h2>Export</h2>
+        <label class="ctl"><span class="head"><span>Output size</span></span>
+          <select id="size">
+            <option value="auto">Auto (keep photo detail, up to 4×)</option>
+            <option value="1">Same as frame (1×)</option>
+            <option value="2">2× frame</option>
+            <option value="4">4× frame</option>
+          </select></label>
+        <button class="primary" id="generate" disabled>Generate PNG</button>
+        <div class="status" id="status" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+"use strict";
+/**
+ * Frame My Photo — fully client-side, no network requests.
+ *
+ * Coordinate model: all photo transforms are stored in "frame pixels"
+ * (the frame PNG's native width/height). The preview and the final export
+ * both call the same draw() routine with a different scale factor `k`,
+ * so what you see is exactly what you get.
+ */
+
+/* ---------- State ---------- */
+const state = {
+  frame: null,           // ImageBitmap of the frame
+  photo: null,           // ImageBitmap of the photo
+  W: 1080, H: 1080,      // output canvas size at 1× (frame size)
+  cx: 540, cy: 540,      // photo centre, in frame pixels
+  scale: 1,              // photo pixels -> frame pixels
+  rot: 0,                // degrees
+  base: 1                // "cover" scale; zoom slider is relative to this
+};
+
+const PREVIEW_MAX = 1200;           // longest side of the preview backing canvas
+const MAX_SIDE = 16384;             // conservative canvas side limit
+const MAX_AREA = 268_000_000;       // conservative canvas area limit (pixels)
+const ZOOM_MIN = -3, ZOOM_MAX = 4;  // log2 range relative to `base`
+
+const $ = (id) => document.getElementById(id);
+const el = {
+  stage: $("stage"), canvas: $("preview"), empty: $("empty"),
+  frameInput: $("frameInput"), photoInput: $("photoInput"),
+  frameName: $("frameName"), photoName: $("photoName"),
+  zoom: $("zoom"), rot: $("rot"), zoomVal: $("zoomVal"), rotVal: $("rotVal"),
+  rotL: $("rotL"), rotR: $("rotR"), reset: $("reset"),
+  size: $("size"), generate: $("generate"), status: $("status")
+};
+const pctx = el.canvas.getContext("2d");
+
+/* ---------- Image loading ---------- */
+const Loader = {
+  /** Decode a File into an ImageBitmap, honouring EXIF orientation. */
+  async decode(file) {
+    try {
+      return await createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch (_) {
+      // Fallback for browsers that reject the options argument.
+      const url = URL.createObjectURL(file);
+      try {
+        const img = new Image();
+        img.src = url;
+        await img.decode();
+        return await createImageBitmap(img);
+      } finally { URL.revokeObjectURL(url); }
+    }
+  }
+};
+
+/* ---------- Photo transform ---------- */
+const Transform = {
+  clampScale(s) {
+    return Math.min(state.base * 2 ** ZOOM_MAX, Math.max(state.base * 2 ** ZOOM_MIN, s));
+  },
+  /** Centre the photo and scale it to fully cover the frame. */
+  fit() {
+    const { photo, W, H } = state;
+    if (!photo) return;
+    state.base = Math.max(W / photo.width, H / photo.height);
+    state.scale = state.base;
+    state.cx = W / 2; state.cy = H / 2; state.rot = 0;
+  },
+  /** Zoom by `factor` while keeping the point (px, py) in frame pixels fixed. */
+  zoomAt(px, py, factor) {
+    const next = this.clampScale(state.scale * factor);
+    const real = next / state.scale;
+    state.cx = px + (state.cx - px) * real;
+    state.cy = py + (state.cy - py) * real;
+    state.scale = next;
+  },
+  pan(dx, dy) { state.cx += dx; state.cy += dy; }
+};
+
+/* ---------- Rendering ---------- */
+const Renderer = {
+  /**
+   * Draw photo (bottom) then frame (top) onto ctx at scale factor k.
+   * k = 1 means frame pixels map 1:1 to canvas pixels.
+   */
+  draw(ctx, k) {
+    const { photo, frame, W, H, cx, cy, scale, rot } = state;
+    ctx.clearRect(0, 0, W * k, H * k);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    if (photo) {
+      ctx.save();
+      ctx.scale(k, k);
+      ctx.translate(cx, cy);
+      ctx.rotate((rot * Math.PI) / 180);
+      ctx.scale(scale, scale);
+      ctx.drawImage(photo, -photo.width / 2, -photo.height / 2);
+      ctx.restore();
+    }
+    if (frame) ctx.drawImage(frame, 0, 0, W * k, H * k);
+  },
+  /** Resize the preview backing store and stage aspect ratio, then redraw. */
+  preview() {
+    const kp = Math.min(1, PREVIEW_MAX / Math.max(state.W, state.H));
+    const w = Math.round(state.W * kp), h = Math.round(state.H * kp);
+    if (el.canvas.width !== w || el.canvas.height !== h) {
+      el.canvas.width = w; el.canvas.height = h;
+    }
+    el.stage.style.setProperty("--ar", state.W / state.H);
+    this.draw(pctx, kp);
+  }
+};
+
+/* ---------- Pointer / wheel interaction ---------- */
+const Interaction = {
+  pointers: new Map(),
+
+  /** Client coordinates -> frame pixel coordinates. */
+  toFrame(clientX, clientY) {
+    const r = el.canvas.getBoundingClientRect();
+    return [(clientX - r.left) * (state.W / r.width), (clientY - r.top) * (state.H / r.height)];
+  },
+  geometry(points) {
+    if (points.length < 2) return null;
+    const [a, b] = points;
+    return { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+  },
+
+  init() {
+    const c = el.canvas;
+    c.addEventListener("pointerdown", (e) => {
+      if (!state.photo) return;
+      c.setPointerCapture(e.pointerId);
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      c.classList.add("dragging");
+    });
+    c.addEventListener("pointermove", (e) => {
+      const prev = this.pointers.get(e.pointerId);
+      if (!prev) return;
+      const before = this.geometry([...this.pointers.values()]);
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const after = this.geometry([...this.pointers.values()]);
+      const f = state.W / c.getBoundingClientRect().width;
+
+      if (before && after) {            // two fingers: pinch-zoom + pan
+        const [px, py] = this.toFrame(after.mx, after.my);
+        Transform.pan((after.mx - before.mx) * f, (after.my - before.my) * f);
+        if (before.d > 0) Transform.zoomAt(px, py, after.d / before.d);
+      } else {                          // one pointer: pan
+        Transform.pan((e.clientX - prev.x) * f, (e.clientY - prev.y) * f);
+      }
+      UI.refresh();
+    });
+    const end = (e) => {
+      this.pointers.delete(e.pointerId);
+      if (!this.pointers.size) c.classList.remove("dragging");
+    };
+    c.addEventListener("pointerup", end);
+    c.addEventListener("pointercancel", end);
+    c.addEventListener("wheel", (e) => {
+      if (!state.photo) return;
+      e.preventDefault();
+      const [px, py] = this.toFrame(e.clientX, e.clientY);
+      Transform.zoomAt(px, py, Math.exp(-e.deltaY * 0.0015));
+      UI.refresh();
+    }, { passive: false });
+  }
+};
+
+/* ---------- Export ---------- */
+const Exporter = {
+  /** Create a canvas and verify the browser really allocated it. */
+  makeCanvas(w, h) {
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillRect(0, 0, 1, 1);
+    try { if (ctx.getImageData(0, 0, 1, 1).data[3] === 0) return null; }
+    catch (_) { return null; }
+    return c;
+  },
+
+  /** Pick an output multiplier from the select box and hard canvas limits. */
+  chooseScale() {
+    const mode = el.size.value;
+    let k = mode === "auto" ? Math.min(4, Math.max(1, 1 / state.scale)) : Number(mode);
+    const limit = Math.min(MAX_SIDE / Math.max(state.W, state.H),
+                           Math.sqrt(MAX_AREA / (state.W * state.H)));
+    return Math.min(k, limit);
+  },
+
+  /** Render at full resolution on an offscreen canvas, shrinking if the device refuses. */
+  render() {
+    let k = this.chooseScale();
+    while (k > 0.25) {
+      const w = Math.round(state.W * k), h = Math.round(state.H * k);
+      const c = this.makeCanvas(w, h);
+      if (c) {
+        const ctx = c.getContext("2d");
+        ctx.clearRect(0, 0, w, h);          // remove the allocation test pixel
+        Renderer.draw(ctx, k);
+        return c;
+      }
+      k *= 0.8;
+    }
+    throw new Error("This device can't allocate a large enough canvas.");
+  },
+
+  toBlob(canvas) {
+    return new Promise((res, rej) =>
+      canvas.toBlob((b) => (b ? res(b) : rej(new Error("PNG encoding failed."))), "image/png"));
+  },
+
+  lastUrl: null,
+  async run() {
+    UI.setStatus("Rendering…");
+    await new Promise((r) => setTimeout(r, 30));   // let the status paint first
+    const canvas = this.render();
+    const blob = await this.toBlob(canvas);
+    if (this.lastUrl) URL.revokeObjectURL(this.lastUrl);
+    this.lastUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = this.lastUrl; a.download = "framed-photo.png";
+    document.body.appendChild(a); a.click(); a.remove();
+    const mb = (blob.size / 1048576).toFixed(1);
+    UI.setStatus(`Done: ${canvas.width} × ${canvas.height} px, ${mb} MB. `, false,
+                 { href: this.lastUrl, text: "Download again" });
+  }
+};
+
+/* ---------- UI wiring ---------- */
+const UI = {
+  setStatus(text, isError = false, link = null) {
+    el.status.className = "status" + (isError ? " error" : "");
+    el.status.textContent = text;
+    if (link) {
+      const a = document.createElement("a");
+      a.href = link.href; a.download = "framed-photo.png"; a.textContent = link.text;
+      el.status.appendChild(a);
+    }
+  },
+
+  /** Sync sliders, labels and the preview with the state. */
+  refresh() {
+    const has = !!state.photo;
+    [el.zoom, el.rot, el.rotL, el.rotR, el.reset].forEach((n) => (n.disabled = !has));
+    el.generate.disabled = !(has && state.frame);
+    el.empty.hidden = has && state.frame;
+    el.empty.textContent = !state.frame && !has ? "Choose a frame and a photo to start."
+      : !state.frame ? "Now choose a transparent PNG frame." : "Now choose a photo.";
+    if (has) {
+      el.zoom.value = Math.log2(state.scale / state.base);
+      el.zoomVal.textContent = (state.scale / state.base).toFixed(2) + "×";
+      el.rot.value = ((((state.rot + 180) % 360) + 360) % 360) - 180;
+      el.rotVal.textContent = Math.round(state.rot * 10) / 10 + "°";
+    }
+    Renderer.preview();
+  },
+
+  async loadFrame(file) {
+    const bmp = await Loader.decode(file);
+    const sizeChanged = bmp.width !== state.W || bmp.height !== state.H;
+    state.frame?.close?.();
+    state.frame = bmp;
+    state.W = bmp.width; state.H = bmp.height;
+    el.frameName.textContent = file.name;
+    if (sizeChanged) Transform.fit();     // new canvas size: re-centre the photo
+  },
+
+  async loadPhoto(file) {
+    const bmp = await Loader.decode(file);
+    state.photo?.close?.();
+    state.photo = bmp;
+    el.photoName.textContent = file.name;
+    Transform.fit();
+  },
+
+  init() {
+    const guard = (fn) => async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try { this.setStatus(""); await fn(file); }
+      catch (err) { this.setStatus("Couldn't open that file. Try a PNG, JPG or WebP image.", true); }
+      this.refresh();
+    };
+    el.frameInput.addEventListener("change", guard((f) => this.loadFrame(f)));
+    el.photoInput.addEventListener("change", guard((f) => this.loadPhoto(f)));
+
+    el.zoom.addEventListener("input", () => {
+      const next = Transform.clampScale(state.base * 2 ** Number(el.zoom.value));
+      Transform.zoomAt(state.W / 2, state.H / 2, next / state.scale);   // anchor on frame centre
+      this.refresh();
+    });
+    el.rot.addEventListener("input", () => { state.rot = Number(el.rot.value); this.refresh(); });
+    el.rotL.addEventListener("click", () => { state.rot -= 90; this.refresh(); });
+    el.rotR.addEventListener("click", () => { state.rot += 90; this.refresh(); });
+    el.reset.addEventListener("click", () => { Transform.fit(); this.refresh(); });
+    el.generate.addEventListener("click", async () => {
+      el.generate.disabled = true;
+      try { await Exporter.run(); }
+      catch (err) { this.setStatus(err.message, true); }
+      el.generate.disabled = false;
+    });
+
+    Interaction.init();
+    this.refresh();
+  }
+};
+
+UI.init();
+</script>
+</body>
+</html>
