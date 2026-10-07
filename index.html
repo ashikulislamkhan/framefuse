@@ -177,32 +177,24 @@
 
 <script>
 "use strict";
-/**
- * Frame My Photo — fully client-side, no network requests.
- *
- * Coordinate model: all photo transforms are stored in "frame pixels"
- * (the frame PNG's native width/height). The preview and the final export
- * both call the same draw() routine with a different scale factor `k`,
- * so what you see is exactly what you get.
- */
 
 /* ---------- State ---------- */
 const state = {
-  frame: null,           // ImageBitmap of the frame
-  items: [], cur: -1,    // batch: loaded photos and the selected index
-  face: null,            // face of the current photo {x, y, w} in photo pixels
-  photo: null,           // ImageBitmap of the photo
-  W: 1080, H: 1080,      // output canvas size at 1× (frame size)
-  cx: 540, cy: 540,      // photo centre, in frame pixels
-  scale: 1,              // photo pixels -> frame pixels
-  rot: 0,                // degrees
-  base: 1                // "cover" scale; zoom slider is relative to this
+  frame: null,           
+  items: [], cur: -1,    
+  face: null,            
+  photo: null,           
+  W: 1080, H: 1080,      
+  cx: 540, cy: 540,      
+  scale: 1,              
+  rot: 0,                
+  base: 1                
 };
 
-const PREVIEW_MAX = 1200;           // longest side of the preview backing canvas
-const MAX_SIDE = 16384;             // conservative canvas side limit
-const MAX_AREA = 268_000_000;       // conservative canvas area limit (pixels)
-const ZOOM_MIN = -3, ZOOM_MAX = 4;  // log2 range relative to `base`
+const PREVIEW_MAX = 1200;           
+const MAX_SIDE = 16384;             
+const MAX_AREA = 268_000_000;       
+const ZOOM_MIN = -3, ZOOM_MAX = 4;  
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -218,12 +210,10 @@ const pctx = el.canvas.getContext("2d");
 
 /* ---------- Image loading ---------- */
 const Loader = {
-  /** Decode a File into an ImageBitmap, honouring EXIF orientation. */
   async decode(file) {
     try {
       return await createImageBitmap(file, { imageOrientation: "from-image" });
     } catch (_) {
-      // Fallback for browsers that reject the options argument.
       const url = URL.createObjectURL(file);
       try {
         const img = new Image();
@@ -240,7 +230,6 @@ const Transform = {
   clampScale(s) {
     return Math.min(state.base * 2 ** ZOOM_MAX, Math.max(state.base * 2 ** ZOOM_MIN, s));
   },
-  /** Centre the photo and scale it to fully cover the frame. */
   fit() {
     const { photo, W, H } = state;
     if (!photo) return;
@@ -249,14 +238,12 @@ const Transform = {
     state.cx = W / 2; state.cy = H / 2; state.rot = 0;
     const f = el.face.checked && state.face;
     if (!f) return;
-    // Suggested crop: face is ~45% of the short side, slightly above centre.
     const s = this.clampScale(Math.max(state.base, (0.45 * Math.min(W, H)) / f.w));
     const hw = (photo.width * s) / 2, hh = (photo.height * s) / 2;
     state.scale = s;
     state.cx = Math.min(hw, Math.max(W - hw, W / 2 - (f.x - photo.width / 2) * s));
     state.cy = Math.min(hh, Math.max(H - hh, H * 0.42 - (f.y - photo.height / 2) * s));
   },
-  /** Zoom by `factor` while keeping the point (px, py) in frame pixels fixed. */
   zoomAt(px, py, factor) {
     const next = this.clampScale(state.scale * factor);
     const real = next / state.scale;
@@ -269,10 +256,6 @@ const Transform = {
 
 /* ---------- Rendering ---------- */
 const Renderer = {
-  /**
-   * Draw photo (bottom) then frame (top) onto ctx at scale factor k.
-   * k = 1 means frame pixels map 1:1 to canvas pixels.
-   */
   draw(ctx, k, ox = 0, oy = 0) {
     const { photo, frame, W, H, cx, cy, scale, rot } = state;
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -290,9 +273,8 @@ const Renderer = {
     }
     if (frame) ctx.drawImage(frame, ox, oy, W * k, H * k);
   },
-  /** Resize the preview backing store and stage aspect ratio, then redraw. */
   preview() {
-    this.raf ||= requestAnimationFrame(() => { this.raf = 0; this.paint(); });   // one paint per frame
+    this.raf ||= requestAnimationFrame(() => { this.raf = 0; this.paint(); });   
   },
   paint() {
     const kp = Math.min(1, PREVIEW_MAX / Math.max(state.W, state.H));
@@ -308,8 +290,6 @@ const Renderer = {
 /* ---------- Pointer / wheel interaction ---------- */
 const Interaction = {
   pointers: new Map(),
-
-  /** Client coordinates -> frame pixel coordinates. */
   toFrame(clientX, clientY) {
     const r = el.canvas.getBoundingClientRect();
     return [(clientX - r.left) * (state.W / r.width), (clientY - r.top) * (state.H / r.height)];
@@ -320,7 +300,6 @@ const Interaction = {
     return { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2,
              ang: Math.atan2(b.y - a.y, b.x - a.x) };
   },
-
   init() {
     const c = el.canvas;
     c.addEventListener("pointerdown", (e) => {
@@ -337,15 +316,15 @@ const Interaction = {
       const after = this.geometry([...this.pointers.values()]);
       const f = state.W / c.getBoundingClientRect().width;
 
-      if (before && after) {            // two fingers: pinch-zoom, twist-rotate, pan
+      if (before && after) {            
         const [px, py] = this.toFrame(after.mx, after.my);
         Transform.pan((after.mx - before.mx) * f, (after.my - before.my) * f);
         if (before.d > 0) Transform.zoomAt(px, py, after.d / before.d);
         const dr = after.ang - before.ang, cos = Math.cos(dr), sin = Math.sin(dr);
-        const vx = state.cx - px, vy = state.cy - py;   // rotate about the pinch midpoint
+        const vx = state.cx - px, vy = state.cy - py;   
         state.cx = px + vx * cos - vy * sin; state.cy = py + vx * sin + vy * cos;
         state.rot += (dr * 180) / Math.PI;
-      } else {                          // one pointer: pan
+      } else {                          
         Transform.pan((e.clientX - prev.x) * f, (e.clientY - prev.y) * f);
       }
       UI.refresh();
@@ -368,7 +347,6 @@ const Interaction = {
 
 /* ---------- Export ---------- */
 const Exporter = {
-  /** Create a canvas and verify the browser really allocated it. */
   makeCanvas(w, h) {
     const c = document.createElement("canvas");
     c.width = w; c.height = h;
@@ -379,8 +357,6 @@ const Exporter = {
     catch (_) { return null; }
     return c;
   },
-
-  /** Pick an output multiplier from the select box and hard canvas limits. */
   chooseScale() {
     const mode = el.size.value;
     let k = mode === "auto" ? Math.min(4, Math.max(1, 1 / state.scale)) : Number(mode);
@@ -388,11 +364,9 @@ const Exporter = {
                            Math.sqrt(MAX_AREA / (state.W * state.H)));
     return Math.min(k, limit);
   },
-
-  /** Render at full resolution on an offscreen canvas, shrinking if the device refuses. */
   render() {
     const p = Number(el.preset.value);
-    if (p) {                                   // square social preset: centre-crop
+    if (p) {                                   
       const c = this.makeCanvas(p, p);
       if (!c) throw new Error("This device can't allocate that canvas.");
       const k = p / Math.min(state.W, state.H);
@@ -405,7 +379,7 @@ const Exporter = {
       const c = this.makeCanvas(w, h);
       if (c) {
         const ctx = c.getContext("2d");
-        ctx.clearRect(0, 0, w, h);          // remove the allocation test pixel
+        ctx.clearRect(0, 0, w, h);          
         Renderer.draw(ctx, k);
         return c;
       }
@@ -413,12 +387,10 @@ const Exporter = {
     }
     throw new Error("This device can't allocate a large enough canvas.");
   },
-
   toBlob(canvas) {
     return new Promise((res, rej) =>
       canvas.toBlob((b) => (b ? res(b) : rej(new Error("PNG encoding failed."))), "image/png"));
   },
-
   url: null,
   save(blob, name) {
     if (this.url) URL.revokeObjectURL(this.url);
@@ -427,9 +399,8 @@ const Exporter = {
     a.href = this.url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
   },
-  /** Render every loaded photo (each keeps its own position); one PNG, or a ZIP for a batch. */
   async run() {
-    const tick = () => new Promise((r) => setTimeout(r, 30));   // let the UI paint
+    const tick = () => new Promise((r) => setTimeout(r, 30));   
     const keep = state.cur, n = state.items.length, files = [], used = new Set();
     for (let i = 0; i < n; i++) {
       UI.setStatus(`Rendering ${i + 1} of ${n}…`); await tick();
@@ -453,7 +424,6 @@ const Exporter = {
 
 /* ---------- Batch: photo list ---------- */
 const Items = {
-  /** Store the live transform back onto the selected item. */
   save() {
     const it = state.items[state.cur];
     if (it) Object.assign(it.t, { cx: state.cx, cy: state.cy, scale: state.scale, rot: state.rot, base: state.base });
@@ -484,7 +454,6 @@ const Items = {
     } else { state.cur = -1; state.photo = null; state.face = null; }
     this.sync(); UI.refresh();
   },
-  /** Re-fit every photo (used when the frame size changes). */
   refitAll() {
     const keep = state.cur;
     state.items.forEach((_, i) => { this.select(i); Transform.fit(); });
@@ -509,7 +478,6 @@ const Items = {
   }
 };
 
-/** Face detection: uses the browser's built-in FaceDetector when present (no model download). */
 const Face = {
   det: null,
   async find(bmp) {
@@ -524,7 +492,6 @@ const Face = {
   }
 };
 
-/** Minimal "store" ZIP writer (PNG is already compressed), so batches download as one file. */
 const Zip = {
   table: (() => {
     const t = new Uint32Array(256);
@@ -571,8 +538,6 @@ const UI = {
       el.status.appendChild(a);
     }
   },
-
-  /** Sync sliders, labels and the preview with the state. */
   refresh() {
     const has = !!state.photo;
     [el.zoom, el.rot, el.rotL, el.rotR, el.reset].forEach((n) => (n.disabled = !has));
@@ -589,7 +554,6 @@ const UI = {
     }
     Renderer.preview();
   },
-
   async loadFrame(file) {
     const bmp = await Loader.decode(file);
     const sizeChanged = bmp.width !== state.W || bmp.height !== state.H;
@@ -597,10 +561,8 @@ const UI = {
     state.frame = bmp;
     state.W = bmp.width; state.H = bmp.height;
     el.frameName.textContent = file.name;
-    if (sizeChanged) Items.refitAll();     // new canvas size: re-centre the photo
+    if (sizeChanged) Items.refitAll();     
   },
-
-  /** Load files as the frame or as photos (batch), reporting errors in the status line. */
   async ingest(files, kind) {
     if (!files.length) return;
     try {
@@ -610,13 +572,10 @@ const UI = {
     } catch (_) { this.setStatus("Couldn't open that file. Try a PNG, JPG or WebP image.", true); }
     this.refresh();
   },
-
   init() {
     const pick = (kind) => (e) => { this.ingest([...e.target.files], kind); e.target.value = ""; };
     el.frameInput.addEventListener("change", pick("frame"));
     el.photoInput.addEventListener("change", pick("photo"));
-
-    // Drag-and-drop on both pickers and on the preview stage.
     const drop = (target, kindFor) => {
       ["dragenter", "dragover"].forEach((t) => target.addEventListener(t, (e) => { e.preventDefault(); target.classList.add("over"); }));
       ["dragleave", "drop"].forEach((t) => target.addEventListener(t, (e) => { e.preventDefault(); target.classList.remove("over"); }));
@@ -628,13 +587,11 @@ const UI = {
     drop(el.frameInput.parentElement, () => "frame");
     drop(el.photoInput.parentElement, () => "photo");
     drop(el.stage, (fs) => (!state.frame && fs[0].type === "image/png" ? "frame" : "photo"));
-    window.addEventListener("dragover", (e) => e.preventDefault());   // a missed drop shouldn't open the file
+    window.addEventListener("dragover", (e) => e.preventDefault());   
     window.addEventListener("drop", (e) => e.preventDefault());
-
-
     el.zoom.addEventListener("input", () => {
       const next = Transform.clampScale(state.base * 2 ** Number(el.zoom.value));
-      Transform.zoomAt(state.W / 2, state.H / 2, next / state.scale);   // anchor on frame centre
+      Transform.zoomAt(state.W / 2, state.H / 2, next / state.scale);   
       this.refresh();
     });
     el.rot.addEventListener("input", () => { state.rot = Number(el.rot.value); this.refresh(); });
@@ -647,10 +604,8 @@ const UI = {
       catch (err) { this.setStatus(err.message, true); }
       el.generate.disabled = false;
     });
-
     el.preset.addEventListener("change", () => { $("sizeWrap").hidden = el.preset.value !== "0"; });
     el.face.addEventListener("change", () => { Transform.fit(); this.refresh(); });
-
     Interaction.init();
     this.refresh();
   }
@@ -658,41 +613,54 @@ const UI = {
 
 UI.init();
 
-// --- Auto-load frame from URL ---
+// --- HIGHLY OPTIMIZED AUTO-LOADER ---
 (async function checkUrlForFrame() {
   const params = new URLSearchParams(window.location.search);
   const frameName = params.get('frame');
   if (!frameName) return; 
 
-  UI.setStatus(`Loading frame "${frameName}" from Drive...`);
   try {
+    UI.setStatus(`1/3: Requesting "${frameName}"...`);
+    
     // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE:
     const scriptUrl = "https://script.google.com/macros/s/AKfycbytkdjqk_PAPC9d6lCtGYpb9PWiqKIm8Wwp4GIyh2_oDGS1g3pmKOy6NYV1qOPwB8dRRw/exec"; 
     
-    const res = await fetch(`${scriptUrl}?name=${encodeURIComponent(frameName)}`);
-    const data = await res.json();
+    const res = await fetch(`${scriptUrl}?name=${encodeURIComponent(frameName)}`, {
+      method: 'GET',
+      redirect: 'follow'
+    });
+    
+    UI.setStatus(`2/3: Receiving image data...`);
+    
+    // Get as text first to handle Google login redirect errors gracefully
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error("CORS blocked or script returned HTML. Please check 'Who has access: Anyone' in Apps Script deployment.");
+    }
 
     if (data.error) throw new Error(data.error);
+    if (!data.b64) throw new Error("No image data returned from Drive.");
 
-    const byteCharacters = atob(data.b64);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    const blob = new Blob([byteArray], {type: data.mime});
+    UI.setStatus(`3/3: Applying frame to canvas...`);
+
+    // Much faster and safer decoding method that won't freeze the browser
+    const fetchImg = await fetch(`data:${data.mime};base64,${data.b64}`);
+    const blob = await fetchImg.blob();
     const file = new File([blob], frameName + ".png", {type: data.mime});
 
     await UI.loadFrame(file);
     UI.setStatus(""); 
     UI.refresh();
+    
   } catch (e) {
-    console.error(e);
-    UI.setStatus(`Failed to load frame: ${frameName}. It may not exist.`, true);
+    console.error("FrameFuse Load Error:", e);
+    UI.setStatus(`Error: ${e.message}`, true);
   }
 })();
 
-/* ---------- PWA: offline support + install button ---------- */
 (function registerPWA() {
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
   let deferred = null;
