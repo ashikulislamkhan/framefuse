@@ -1,7 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<metaed: #8fb0b6;
+<meta charset="utf-8">
+<script>
+  // Resolve every relative URL from the app root, even when served at /frame/<slug>.
+  document.write('<base href="' + location.pathname.replace(/frame\/[^/]+\/?$/, "").replace(/[^/]*$/, "") + '">');
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FrameFuse · Free Profile Picture Frame &amp; DP Overlay Tool</title>
+<meta name="theme-color" content="#0b8794">
+<meta name="description" content="Free profile picture frame and DP overlay tool. Runs entirely in your browser.">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #e3f5f6; --panel: #ffffff; --ink: #0c2a2e; --muted: #4f6f77;
+    --line: #bfe0e3; --accent: #0b8794; --accent-ink: #ffffff; --radius: 12px;
+    --check-a: #f1fafb; --check-b: #d6ebed;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1b1f; --panel: #12272c; --ink: #e4f6f8; --muted: #8fb0b6;
       --line: #25444b; --accent: #2dd4cf; --accent-ink: #04201f;
       --check-a: #1b3338; --check-b: #152a2e;
     }
