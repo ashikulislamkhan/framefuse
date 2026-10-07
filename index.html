@@ -2,6 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<script>
+  // Resolve every relative URL from the app root, even when served at /frame/<slug>.
+  document.write('<base href="' + location.pathname.replace(/frame\/[^/]+\/?$/, "").replace(/[^/]*$/, "") + '">');
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FrameFuse · Free Profile Picture Frame &amp; DP Overlay Tool</title>
 <meta name="theme-color" content="#0b8794">
@@ -87,6 +91,10 @@
   .th .rm { position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; padding: 0; border-radius: 50%; line-height: 1; background: var(--panel); }
   .tick { display: flex; gap: 8px; align-items: center; font-size: 0.875rem; }
   .foot { text-align: center; color: var(--muted); font-size: 0.8125rem; padding: 8px 16px 28px; }
+  .hosted { display: flex; justify-content: space-between; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 0.9rem; }
+  .hosted a, .nf a:not(.btn) { color: var(--accent); }
+  .nf { text-align: center; padding: 64px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+  .btn { display: inline-block; padding: 10px 18px; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font-weight: 600; text-decoration: none; }
 </style>
 </head>
 <body>
@@ -94,7 +102,7 @@
   <h1>FrameFuse</h1>
   <p class="sub">Free Profile Picture Frame &amp; DP Overlay Tool</p>
 
-  <div class="layout">
+  <div class="layout" id="layout">
     <section class="stage-wrap" aria-label="Preview">
       <div class="stage" id="stage">
         <canvas id="preview" aria-label="Preview. Drag to move the photo, scroll or pinch to zoom."></canvas>
@@ -105,6 +113,7 @@
     <section class="panel">
       <div class="group">
         <h2>Images</h2>
+        <div class="hosted" id="hosted" hidden><span>Frame: <strong id="hostedTitle"></strong></span><a href="./">Use my own</a></div>
         <label class="file"><strong>Frame (PNG)</strong><span class="name" id="frameName">None</span>
           <input type="file" id="frameInput" accept="image/png"></label>
         <label class="file"><strong>Photos</strong><span class="name" id="photoName">None</span>
@@ -151,11 +160,17 @@
       </div>
     </section>
   </div>
+<section class="nf" id="notFound" hidden>
+    <h2>Frame not found</h2>
+    <p>This frame link doesn't exist or has been removed.</p>
+    <a class="btn" href="./">Return Home</a>
+  </section>
 </main>
 <footer class="foot">© All rights reserved Khan Inc. | Ashikul Islam Khan</footer>
 
-<script>
-"use strict";
+<script type="module">
+import { getFrameSlug, restoreDeepLink } from "./router.js";
+import { FrameProvider } from "./frame-provider.js";
 /**
  * Frame My Photo — fully client-side, no network requests.
  *
@@ -191,7 +206,8 @@ const el = {
   zoom: $("zoom"), rot: $("rot"), zoomVal: $("zoomVal"), rotVal: $("rotVal"),
   rotL: $("rotL"), rotR: $("rotR"), reset: $("reset"),
   size: $("size"), generate: $("generate"), status: $("status"),
-  preset: $("preset"), face: $("face"), thumbs: $("thumbs"), install: $("install")
+  preset: $("preset"), face: $("face"), thumbs: $("thumbs"), install: $("install"),
+  hosted: $("hosted"), hostedTitle: $("hostedTitle"), layout: $("layout"), notFound: $("notFound")
 };
 const pctx = el.canvas.getContext("2d");
 
@@ -569,13 +585,15 @@ const UI = {
     Renderer.preview();
   },
 
-  async loadFrame(file) {
-    const bmp = await Loader.decode(file);
+  async loadFrame(file) { this.setFrame(await Loader.decode(file), file.name); },
+
+  /** Install a decoded frame, whether uploaded or hosted. */
+  setFrame(bmp, label) {
     const sizeChanged = bmp.width !== state.W || bmp.height !== state.H;
     state.frame?.close?.();
     state.frame = bmp;
     state.W = bmp.width; state.H = bmp.height;
-    el.frameName.textContent = file.name;
+    el.frameName.textContent = label;
     if (sizeChanged) Items.refitAll();     // new canvas size: re-centre the photo
   },
 
@@ -636,6 +654,35 @@ const UI = {
 };
 
 UI.init();
+
+/* ---------- Hosted frames: /frame/<slug> ---------- */
+async function boot() {
+  restoreDeepLink();
+  const slug = getFrameSlug();
+  if (!slug) return;                                   // no slug: the editor behaves exactly as before
+
+  const picker = el.frameInput.parentElement;
+  picker.hidden = true; el.hosted.hidden = false;
+  el.empty.textContent = "Loading frame…";
+  try {
+    const provider = new FrameProvider();
+    const frame = await provider.find(slug);
+    if (!frame) {
+      document.title = "Frame not found · FrameFuse";
+      el.layout.hidden = true; el.notFound.hidden = false;
+      return;
+    }
+    el.hostedTitle.textContent = frame.title;
+    document.title = `${frame.title} · FrameFuse`;
+    UI.setFrame(await provider.getBitmap(frame), frame.filename || frame.title);
+  } catch (err) {
+    console.error(err);                                // fall back to manual upload
+    el.hosted.hidden = true; picker.hidden = false;
+    UI.setStatus("Couldn't load the hosted frame. You can upload a frame manually.", true);
+  }
+  UI.refresh();
+}
+boot();
 
 /* ---------- PWA: offline support + install button ---------- */
 (function registerPWA() {
