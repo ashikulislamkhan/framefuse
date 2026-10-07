@@ -446,7 +446,7 @@ const Exporter = {
     const fname = one ? files[0].name : "framefuse-batch.zip";
     const blob = one ? files[0].blob : await Zip.build(files);
     this.save(blob, fname);
-    UI.setStatus(`Done: ${one ? `${files[0].w} × ${files[0].h} px` : `${n} images`}, ${(blob.size / 1048576).toFixed(1)} MB. `,
+    UI.setStatus(`Done: ${one ? `${files[0].w} ×${files[0].h} px` : `${n} images`}, ${(blob.size / 1048576).toFixed(1)} MB. `,
                  false, { href: this.url, text: "Download again", name: fname });
   }
 };
@@ -657,6 +657,40 @@ const UI = {
 };
 
 UI.init();
+
+// --- Auto-load frame from URL ---
+(async function checkUrlForFrame() {
+  const params = new URLSearchParams(window.location.search);
+  const frameName = params.get('frame');
+  if (!frameName) return; 
+
+  UI.setStatus(`Loading frame "${frameName}" from Drive...`);
+  try {
+    // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE:
+    const scriptUrl = "https://script.google.com/macros/s/AKfycbytkdjqk_PAPC9d6lCtGYpb9PWiqKIm8Wwp4GIyh2_oDGS1g3pmKOy6NYV1qOPwB8dRRw/exec"; 
+    
+    const res = await fetch(`${scriptUrl}?name=${encodeURIComponent(frameName)}`);
+    const data = await res.json();
+
+    if (data.error) throw new Error(data.error);
+
+    const byteCharacters = atob(data.b64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], {type: data.mime});
+    const file = new File([blob], frameName + ".png", {type: data.mime});
+
+    await UI.loadFrame(file);
+    UI.setStatus(""); 
+    UI.refresh();
+  } catch (e) {
+    console.error(e);
+    UI.setStatus(`Failed to load frame: ${frameName}. It may not exist.`, true);
+  }
+})();
 
 /* ---------- PWA: offline support + install button ---------- */
 (function registerPWA() {
